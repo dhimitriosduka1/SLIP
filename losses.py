@@ -17,9 +17,9 @@ class CLIPLoss(nn.Module):
         self.last_local_batch_size = None
 
     def forward(self, outputs):
-        image_embed = outputs['image_embed']
-        text_embed = outputs['text_embed']
-        logit_scale = outputs['logit_scale']
+        image_embed = outputs["image_embed"]
+        text_embed = outputs["text_embed"]
+        logit_scale = outputs["logit_scale"]
         local_batch_size = image_embed.size(0)
 
         if local_batch_size != self.last_local_batch_size:
@@ -33,15 +33,18 @@ class CLIPLoss(nn.Module):
         text_embed = F.normalize(text_embed, dim=-1, p=2)
 
         # gather features from all GPUs
-        image_embed_all, text_embed_all = \
-            utils.all_gather_batch([image_embed, text_embed])
+        image_embed_all, text_embed_all = utils.all_gather_batch(
+            [image_embed, text_embed]
+        )
 
         # cosine similarity as logits
         logits_per_image = logit_scale * image_embed @ text_embed_all.t()
         logits_per_text = logit_scale * text_embed @ image_embed_all.t()
 
-        loss = (F.cross_entropy(logits_per_image, self.labels) + \
-            F.cross_entropy(logits_per_text, self.labels)) / 2
+        loss = (
+            F.cross_entropy(logits_per_image, self.labels)
+            + F.cross_entropy(logits_per_text, self.labels)
+        ) / 2
 
         # compute accuracy
         with torch.no_grad():
@@ -49,7 +52,7 @@ class CLIPLoss(nn.Module):
             correct = pred.eq(self.labels).sum()
             acc = 100 * correct / local_batch_size
 
-        return {'loss': loss, 'clip_loss': loss, 'clip_acc': acc}
+        return {"loss": loss, "clip_loss": loss, "clip_acc": acc}
 
 
 class SIMCLRLoss(nn.Module):
@@ -71,8 +74,8 @@ class SIMCLRLoss(nn.Module):
         self.last_local_batch_size = None
 
     def forward(self, outputs):
-        q_a = outputs['aug1_embed']
-        q_b = outputs['aug2_embed']
+        q_a = outputs["aug1_embed"]
+        q_b = outputs["aug2_embed"]
 
         q_a = F.normalize(q_a, dim=-1, p=2)
         q_b = F.normalize(q_b, dim=-1, p=2)
@@ -106,7 +109,7 @@ class SIMCLRLoss(nn.Module):
             correct = pred.eq(self.labels).sum()
             acc = 100 * correct / local_batch_size
 
-        return {'loss': loss, 'ssl_loss': loss, 'ssl_acc': acc}
+        return {"loss": loss, "ssl_loss": loss, "ssl_acc": acc}
 
 
 class SLIPLoss(nn.Module):
@@ -118,15 +121,17 @@ class SLIPLoss(nn.Module):
 
     def forward(self, outputs):
         clip_loss_dict = self.clip_loss(outputs)
-        clip_loss = clip_loss_dict['clip_loss']
-        clip_acc = clip_loss_dict['clip_acc']
+        clip_loss = clip_loss_dict["clip_loss"]
+        clip_acc = clip_loss_dict["clip_acc"]
 
         ssl_loss_dict = self.ssl_loss(outputs)
-        ssl_loss = ssl_loss_dict['ssl_loss']
-        ssl_acc = ssl_loss_dict['ssl_acc']
+        ssl_loss = ssl_loss_dict["ssl_loss"]
+        ssl_acc = ssl_loss_dict["ssl_acc"]
 
-        return {'loss': clip_loss + self.ssl_scale * ssl_loss,
-                'clip_loss': clip_loss,
-                'clip_acc': clip_acc,
-                'ssl_loss': ssl_loss,
-                'ssl_acc': ssl_acc}
+        return {
+            "loss": clip_loss + self.ssl_scale * ssl_loss,
+            "clip_loss": clip_loss,
+            "clip_acc": clip_acc,
+            "ssl_loss": ssl_loss,
+            "ssl_acc": ssl_acc,
+        }
