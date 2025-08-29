@@ -277,18 +277,27 @@ def get_dataset(train_transform, tokenizer, args):
         return ImageCaptionDatasetSSL(args.dataset, args.root, args.metadata, augment)
     elif args.model.startswith("CLIP"):
         return get_wds_dataset(
-            args=args, preprocess_img=train_transform, augment=augment,is_train=True, tokenizer=tokenizer
+            args=args,
+            preprocess_img=train_transform,
+            augment=augment,
+            is_train=True,
+            tokenizer=tokenizer,
         )
         # return ImageCaptionDatasetCLIP(
         #     args.dataset, args.root, args.metadata, train_transform, tokenizer
         # )
     elif args.model.startswith("SLIP"):
         return get_wds_dataset(
-            args=args, preprocess_img=train_transform, is_train=True, tokenizer=tokenizer
+            args=args,
+            preprocess_img=train_transform,
+            augment=augment,
+            is_train=True,
+            tokenizer=tokenizer,
         )
         # return ImageCaptionDatasetSLIP(
         #     args.dataset, args.root, args.metadata, train_transform, augment, tokenizer
         # )
+
 
 # ================================= STUFF FOR WEBDATASET ===================================
 
