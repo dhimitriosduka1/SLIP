@@ -274,7 +274,7 @@ class SLIP(CLIP):
         }
 
 
-def get_loss(model, ssl_temp, ssl_scale):
+def get_loss(model, ssl_temp, ssl_scale, args):
     if model.startswith("SLIP"):
         ssl_loss = losses.SIMCLRLoss(temperature=ssl_temp)
         return losses.SLIPLoss(ssl_loss, ssl_scale)
@@ -282,6 +282,12 @@ def get_loss(model, ssl_temp, ssl_scale):
         return losses.CLIPLoss()
     if model.startswith("SIMCLR"):
         return losses.SIMCLRLoss(temperature=ssl_temp)
+    if model.startswith("TEMO"):
+        return losses.TeMoLoss(
+            tau_min=args.tau_min,
+            tau_alpha=args.tau_alpha,
+            total_steps=args.total_steps,
+        )
 
 
 def get_metric_names(model):
