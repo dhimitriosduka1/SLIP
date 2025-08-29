@@ -155,27 +155,13 @@ class TeMoLoss(nn.Module):
 
     def __init__(
         self,
-        local_loss=False,
-        gather_with_grad=False,
-        cache_labels=False,
-        rank=0,
-        world_size=1,
-        use_horovod=False,
         tau_min=0.01,
         tau_alpha=0.04,
         total_steps=1,
     ):
         super().__init__()
-        self.local_loss = local_loss
-        self.gather_with_grad = gather_with_grad
-        self.cache_labels = cache_labels
-        self.rank = rank
-        self.world_size = world_size
-        self.use_horovod = use_horovod
-
-        # cache state
-        self.prev_num_logits = 0
-        self.labels = {}
+        self.labels = None
+        self.last_local_batch_size = None
 
         # TeMo params
         self.tau_min = tau_min
@@ -188,19 +174,6 @@ class TeMoLoss(nn.Module):
         print(f"Total number of steps: {self.total_steps}")
         print(f"Tau min: {self.tau_min}")
         print(f"Tau alpha: {self.tau_alpha}")
-
-    def get_ground_truth(self, device, num_logits) -> torch.Tensor:
-        # calculated ground-truth and cache if enabled
-        if self.prev_num_logits != num_logits or device not in self.labels:
-            labels = torch.arange(num_logits, device=device, dtype=torch.long)
-            if self.world_size > 1 and self.local_loss:
-                labels = labels + num_logits * self.rank
-            if self.cache_labels:
-                self.labels[device] = labels
-                self.prev_num_logits = num_logits
-        else:
-            labels = self.labels[device]
-        return labels
 
     def _sim_to_temperature(self, sim):
         return self.tau_min + self.tau_alpha * torch.sqrt((sim + 1.0) / 2.0)
@@ -219,9 +192,8 @@ class TeMoLoss(nn.Module):
         text_aug_features,
         logit_scale,
         current_step,
-        logit_bias=None,
-        output_dict=False,
     ):
+
         if self.world_size > 1:
             all_image_features, all_text_features = utils.all_gather_batch(
                 [image_features, text_features]
@@ -231,7 +203,7 @@ class TeMoLoss(nn.Module):
                 [image_aug_features, text_aug_features]
             )
 
-            if self.rank == 0 and self._printed_feature_shapes:
+            if self._printed_feature_shapes:
                 print(f"[DEBUG] Multi-node gathered feature shapes:")
                 print(f"  all_image_features: {all_image_features.shape}")
                 print(f"  all_text_features: {all_text_features.shape}")
@@ -245,16 +217,21 @@ class TeMoLoss(nn.Module):
             all_image_aug_features = image_aug_features
             all_text_aug_features = text_aug_features
 
+        if local_batch_size != self.last_local_batch_size:
+            self.labels = local_batch_size * utils.get_rank() + torch.arange(
+                local_batch_size, device=image_embed.device
+            )
+            self.last_local_batch_size = local_batch_size
+
         device = image_features.device
-        labels = self.get_ground_truth(device, all_image_features.shape[0])
 
         i2t_sim = all_image_features @ all_text_features.T
         t2i_sim = i2t_sim.T
 
         # ============== Compute normal CLIP loss ==================
         info_nce_loss = (
-            F.cross_entropy(logit_scale * i2t_sim, labels)
-            + F.cross_entropy(logit_scale * t2i_sim, labels)
+            F.cross_entropy(i2t_sim / logit_scale, self.labels)
+            + F.cross_entropy(t2i_sim / logit_scale, self.labels)
         ) / 2
         # ============== Compute normal CLIP loss ==================
 
@@ -263,8 +240,8 @@ class TeMoLoss(nn.Module):
         t2i_temp = self._sim_to_temperature(t2i_sim)
 
         m_info_nce_loss = (
-            F.cross_entropy(i2t_sim / i2t_temp, labels)
-            + F.cross_entropy(t2i_sim / t2i_temp, labels)
+            F.cross_entropy(i2t_sim / i2t_temp, self.labels)
+            + F.cross_entropy(t2i_sim / t2i_temp, self.labels)
         ) / 2
         # ============== Compute modulated CLIP loss ==================
 
@@ -272,14 +249,14 @@ class TeMoLoss(nn.Module):
         i2i_sim = all_image_features @ all_image_aug_features.T
         i2i_temp = self._sim_to_temperature(i2i_sim)
 
-        m_i2i_loss = F.cross_entropy(i2i_sim / i2i_temp, labels)
+        m_i2i_loss = F.cross_entropy(i2i_sim / i2i_temp, self.labels)
         # ============== Compute modulated I2I loss ==================
 
         # ============== Compute modulated T2T loss ==================
         t2t_sim = all_text_features @ all_text_aug_features.T
         t2t_temp = self._sim_to_temperature(t2t_sim)
 
-        m_t2t_loss = F.cross_entropy(t2t_sim / t2t_temp, labels)
+        m_t2t_loss = F.cross_entropy(t2t_sim / t2t_temp, self.labels)
         # ============== Compute modulated T2T loss ==================
 
         alpha, beta = self._compute_alpha_and_beta(current_step)
