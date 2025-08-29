@@ -156,6 +156,20 @@ def get_args_parser():
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--gpu", default=None, type=int, help="GPU id to use.")
     parser.add_argument("--wandb", action="store_true", help="Enable WandB logging")
+
+    # For TeMo
+    parser.add_argument(
+        "--tau-min", type=float, default=0.0, help="tau_min for TeMo"
+    )
+
+    parser.add_argument(
+        "--tau-alpha", type=float, default=0.0, help="tau_alpha for TeMo"
+    )
+
+    parser.add_argument(
+        "--initial-temperature", type=float, default=0.07, help="initial temperature for the standard infonce in TeMo"
+    )
+
     return parser
 
 
@@ -458,7 +472,7 @@ def train(train_loader, model, criterion, optimizer, scaler, epoch, lr_schedule,
         # compute output
         with amp.autocast(enabled=not args.disable_amp):
             # Check the type of model used:
-            if args.model.startswith("CLIP"):
+            if args.model.startswith("CLIP") or args.model.startswith("TEMO"):
                 outputs = model(
                     image=image1, text=text1, image_aug=image2, text_aug=text2
                 )
@@ -469,7 +483,18 @@ def train(train_loader, model, criterion, optimizer, scaler, epoch, lr_schedule,
                     "Only CLIP and SLIP models are currently supported"
                 )
 
-            loss_dict = criterion(outputs)
+            if args.model.startswith("TEMO"):
+                loss_dict = criterion(
+                    image_features=output["image_embed"],
+                    text_features=output["text_embed"],
+                    image_aug_features=output["image_aug_embed"],
+                    text_aug_features=output["text_aug_embed"],
+                    logit_scale=args.initial_temperature,
+                    current_step=it,
+                )
+            else:
+                loss_dict = criterion(outputs)
+
             loss = loss_dict["loss"]
             loss /= args.update_freq
 
@@ -490,6 +515,8 @@ def train(train_loader, model, criterion, optimizer, scaler, epoch, lr_schedule,
         # clamp logit scale to [0, 100]
         if args.model.startswith("SIMCLR"):
             logit_scale = 0
+        elif args.model.startswith("TEMO"):
+            logit_scale = args.initial_temperature
         else:
             utils.get_model(model).logit_scale.data.clamp_(0, 4.6052)
             logit_scale = utils.get_model(model).logit_scale.exp().item()
