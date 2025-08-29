@@ -293,7 +293,7 @@ def get_metric_names(model):
         return ["loss", "ssl_loss", "ssl_acc"]
 
 
-@timm.models.registry.register_model
+@timm.models.register_model
 def vit_small_mocov3_patch16_224(**kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=12, **kwargs)
     model = timm.models.vision_transformer._create_vision_transformer(
