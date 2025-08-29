@@ -43,12 +43,34 @@ def get_args_parser():
     )
     parser.add_argument("--root", default="", type=str, help="path to dataset root")
     parser.add_argument(
+        "--train-data",
+        type=str,
+        default=None,
+        help="Path to file(s) with training data. When using webdataset, multiple datasources can be combined using the `::` separator.",
+    )
+    parser.add_argument(
+        "--train-num-samples",
+        type=int,
+        default=None,
+        help="Number of samples in dataset. Required for webdataset if not available in info file.",
+    )
+    parser.add_argument(
+        "--train-data-upsampling-factors",
+        type=str,
+        default=None,
+        help=(
+            "When using multiple data sources with webdataset and sampling with replacement, this can be used to upsample specific data sources. "
+            "Similar to --train-data, this should be a string with as many numbers as there are data sources, separated by `::` (e.g. 1::2::0.5) "
+            "By default, datapoints are sampled uniformly regardless of the dataset sizes."
+        )
+    )
+    parser.add_argument(
         "--metadata",
         default="yfcc15m.pkl",
         type=str,
         help="path to metadata file (see README for details)",
     )
-    parser.add_argument("--output-dir", default="./", type=str, help="output dir")
+    parser.add_argument("--output-dir", default="/ptmp/dduka/work/training_metadata/slip", type=str, help="output dir")
     # Model
     parser.add_argument("--model", default="SLIP_VITB16", type=str)
     parser.add_argument(
@@ -253,29 +275,42 @@ def main(args):
     )
 
     train_dataset = datasets.get_dataset(train_transform, tokenizer, args)
+
+    # Set total_steps
+    num_batches_per_epoch = train_dataset.dataloader.num_batches // args.update_freq
+    args.num_batches_per_epoch = num_batches_per_epoch
+    args.total_steps = args.epochs * num_batches_per_epoch
+    args.train_sz = train_dataset.dataloader.num_samples
+
     cwd = os.path.dirname(os.path.realpath(__file__))
-    with open(os.path.join(cwd, "dataset_catalog.json")) as f:
-        root = json.load(f)["imagenet"]["path"]
+
+    # with open(os.path.join(cwd, "dataset_catalog.json")) as f:
+    #     root = json.load(f)["imagenet"]["path"]
+
+    root = "/ptmp/dduka/databases/imagenet/"
     val_dataset = ImageFolder(os.path.join(root, "val"), val_transform)
 
     # dist eval resamples data to pad uneven batch sizes
     # make sure num_samples = 0 mod num_gpus for exact acc
     if args.distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        # train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+        train_sampler = None
         val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
     else:
         train_sampler = None
         val_sampler = None
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=args.workers,
-        pin_memory=True,
-        sampler=train_sampler,
-        drop_last=True,
-    )
+    # train_loader = torch.utils.data.DataLoader(
+    #     train_dataset,
+    #     batch_size=args.batch_size,
+    #     shuffle=(train_sampler is None),
+    #     num_workers=args.workers,
+    #     pin_memory=True,
+    #     sampler=train_sampler,
+    #     drop_last=True,
+    # )
+
+    train_loader = train_dataset.dataloader
 
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
@@ -298,11 +333,20 @@ def main(args):
                 f.write(json.dumps(zero_stats) + "\n")
         return
 
+    # lr_schedule = utils.cosine_scheduler(
+    #     args.lr,
+    #     args.lr_end,
+    #     args.epochs,
+    #     len(train_loader) // args.update_freq,
+    #     warmup_epochs=args.warmup_epochs,
+    #     start_warmup_value=args.lr_start,
+    # )
+
     lr_schedule = utils.cosine_scheduler(
         args.lr,
         args.lr_end,
         args.epochs,
-        len(train_loader) // args.update_freq,
+        num_batches_per_epoch // args.update_freq,
         warmup_epochs=args.warmup_epochs,
         start_warmup_value=args.lr_start,
     )
@@ -316,7 +360,8 @@ def main(args):
     print("=> beginning training")
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
-            train_sampler.set_epoch(epoch)
+            # train_sampler.set_epoch(epoch)
+            train_dataset.set_epoch(epoch)
 
         # train for one epoch
         train_stats = train(
@@ -368,7 +413,7 @@ def train(train_loader, model, criterion, optimizer, scaler, epoch, lr_schedule,
     data_time = AverageMeter("Data", ":6.2f")
     mem = AverageMeter("Mem (GB)", ":6.1f")
     metric_names = models.get_metric_names(args.model)
-    iters_per_epoch = len(train_loader) // args.update_freq
+    iters_per_epoch = args.num_batches_per_epoch // args.update_freq
     metrics = OrderedDict([(name, AverageMeter(name, ":.2e")) for name in metric_names])
     progress = ProgressMeter(
         iters_per_epoch,
@@ -393,9 +438,28 @@ def train(train_loader, model, criterion, optimizer, scaler, epoch, lr_schedule,
 
         inputs = [tensor.cuda(args.gpu, non_blocking=True) for tensor in inputs]
 
+        image1 = inputs[0]
+        text1 = inputs[1]
+
+        image2 = inputs[2]
+        text2 = inputs[3]
+
+        image3 = inputs[4]
+
         # compute output
         with amp.autocast(enabled=not args.disable_amp):
-            outputs = model(*inputs)
+            # Check the type of model used:
+            if args.model.startswith("CLIP"):
+                outputs = model(
+                    image=image1, text=text1, image_aug=image2, text_aug=text2
+                )
+            elif args.model.startswith("SLIP"):
+                outputs = model(image=image1, text=text1, aug1=image2, aug2=image3)
+            else:
+                raise NotImplementedError(
+                    "Only CLIP and SLIP models are currently supported"
+                )
+
             loss_dict = criterion(outputs)
             loss = loss_dict["loss"]
             loss /= args.update_freq

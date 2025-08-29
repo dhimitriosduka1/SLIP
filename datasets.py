@@ -314,8 +314,8 @@ def with_additional_augmentations(
         text = sample["text"]
         random_text = random.sample(rephrased_captions[key]["paraphrases"], 1)[0]
 
-        out["text1"] = tokenizer(text)[0]
-        out["text2"] = tokenizer(random_text)[0]
+        out["text1"] = tokenizer(text)
+        out["text2"] = tokenizer(random_text)
 
         return out
 
