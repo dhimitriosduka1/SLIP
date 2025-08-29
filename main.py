@@ -360,7 +360,7 @@ def main(args):
     if args.start_epoch == 0:
         print("=> performing zsh eval")
         val_stats = validate_zeroshot(val_loader, model, tokenizer, args)
-         if utils.is_main_process() and args.wandb:
+        if utils.is_main_process() and args.wandb:
             wandb.log({
                 **{f"test_{k}": v for k, v in val_stats.items()},
                 "epoch": epoch
