@@ -295,6 +295,37 @@ def get_metric_names(model):
         return ["loss", "clip_loss", "ssl_loss", "clip_acc", "ssl_acc"]
     elif model.startswith("CLIP"):
         return ["loss", "clip_loss", "clip_acc"]
+    elif model.startswith("TEMO"):
+        prefixes = ["i2t/", "t2i/", "i2i/", "t2t/"]
+
+        base_keys = [
+            "loss",
+            "info_nce_loss",
+            "m_i2i_loss",
+            "m_t2t_loss",
+            "alpha",
+            "beta",
+        ]
+
+        metrics = [
+            "min_per_sample_temperature",
+            "max_per_sample_temperature",
+            "avg_per_sample_temperature",
+            "median_per_sample_temperature",
+            "quantile_0.5_per_sample_temperature",
+            "positive_samples_min_temperature",
+            "positive_samples_max_temperature",
+            "positive_samples_avg_temperature",
+            "positive_samples_median_temperature",
+            "positive_samples_quantile_0.5_temperature",
+            "negative_samples_min_temperature",
+            "negative_samples_max_temperature",
+            "negative_samples_avg_temperature",
+            "negative_samples_median_temperature",
+            "negative_samples_quantile_0.5_temperature",
+        ]
+
+        return base_keys + [f"{prefix}{metric}" for prefix in prefixes for metric in metrics]
     else:
         return ["loss", "ssl_loss", "ssl_acc"]
 
