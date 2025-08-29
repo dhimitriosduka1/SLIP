@@ -51,4 +51,4 @@ srun --cpu_bind=v --accel-bind=gn torchrun \
     --wd 0.1 \
     --batch-size 128 \
     --wandb \
-    --output-dir '/ptmp/dduka/work/training_metadata/slip/SLIP_BASELINE_4096_ViTB16'
+    --output-dir '/ptmp/dduka/work/training_metadata/slip/SLIP_BL_4096_ViTB16'
