@@ -363,7 +363,7 @@ def main(args):
         if utils.is_main_process() and args.wandb:
             wandb.log({
                 **{f"test_{k}": v for k, v in val_stats.items()},
-                "epoch": epoch
+                "epoch": 0
             })    
 
     print("=> beginning training")
